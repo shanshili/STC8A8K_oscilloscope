@@ -1,0 +1,215 @@
+C51 COMPILER V9.00   8A8KADCTEST                                                           12/07/2021 15:25:04 PAGE 1   
+
+
+C51 COMPILER V9.00, COMPILATION OF MODULE 8A8KADCTEST
+OBJECT MODULE PLACED IN 8a8kADCtest.OBJ
+COMPILER INVOKED BY: E:\keil\C51\BIN\C51.EXE 8a8kADCtest.c LARGE BROWSE DEBUG OBJECTEXTEND TABS(2)
+
+line level    source
+
+   1          /*
+   2            建立代码框架：
+   3                底层驱动SDK、
+   4                GUI、
+   5                数据——收发字节转换函数、
+   6                采样数据处理、
+   7                ADC滤波算法、
+   8            设定刷新频率
+   9          */
+  10          
+  11          #include "8a8k.h"
+  12          #include <stdio.h>
+  13          #include <intrins.h>
+  14          #include "oled.h"
+  15          #include "uart.h"
+  16          
+  17          unsigned char a[1],b[1],d=0,e=0,x,y;
+  18          unsigned char ybucketh[130],ybucketl[130];
+  19          
+  20          void Delay3000ms()    //@24.000MHz
+  21          {
+  22   1        unsigned char i, j, k;
+  23   1      
+  24   1        _nop_();
+  25   1        _nop_();
+  26   1        i = 18;
+  27   1        j = 150;
+  28   1        k = 212;
+  29   1        do
+  30   1        {
+  31   2          do
+  32   2          {
+  33   3            while (--k);
+  34   3          } while (--j);
+  35   2        } while (--i);
+  36   1      }
+  37          
+  38          
+  39          /*中断法
+  40              串口3模式0
+  41              TxD3 P0.1
+  42              RxD3 P0.0
+  43              功能角映射：P_SW2=0x00
+  44              波特率设置
+  45              时钟
+  46              中断方式的ADC
+  47              
+  48              OLED I/O口工作方式
+  49          */
+  50          void ADC_Isr() interrupt 5 using 1 ///question：using 1？？
+  51          {
+  52   1          ADC_CONTR &= ~0x20;
+  53   1          a[0]=ADC_RES;    
+  54   1          b[0]=ADC_RESL;  ///????char形数组，一个位置能放几个数
+  55   1          ADC_CONTR|=0X40;
+C51 COMPILER V9.00   8A8KADCTEST                                                           12/07/2021 15:25:04 PAGE 2   
+
+  56   1          d++;
+  57   1      }
+  58          
+  59          void main() 
+  60          { 
+  61   1         OLED_Init(); //初始化OLED  
+  62   1         P1M0 = 0x00; //设置 P1.0 为 ADC 口
+  63   1         P1M1 = 0x01;  //高阻输入
+  64   1         ADCCFG = 0x00; 
+  65   1        //设置 ADC 时钟为系统时钟/2/16/0  SYSclk/2/16/SPEED  采样750000HZ 1.3us 被采最高频率3750
+             -00hz
+  66   1        //左对齐
+  67   1         ADC_CONTR = 0x80; //使能 ADC 模块
+  68   1         EADC=1;
+  69   1         EA=1;
+  70   1         ADC_CONTR |= 0x40; //启动 AD 转换
+  71   1         OLED_Clear(1);
+  72   1         Delay3000ms();
+  73   1         while(1)//等待中断
+  74   1         {
+  75   2             UartInit(); //串口打印
+  76   2             printf("a=%x\nb=%x\n",a[0],b[0]);
+  77   2             OLED_Clear(0);
+  78   2      //       OLED_Set_Pos(1,1);
+  79   2      /*
+  80   2           x与d(中断次数）之间的关系:128像素 0.0013ms每像素
+  81   2           
+  82   2           y与ab(采样值之间的关系)：64/8=8  像素/伏 (每伏占4个像素)(区间-1.5~6.5V)
+  83   2                                    5/4096=0.001220703125 精度/伏   819.2伏/精度
+  84   2                                    3276.8  像素/精度
+  85   2                                    （以上方案废弃）
+  86   2           新方案：page[0,6:7]不显示，仅在page1~5显示
+  87   2           采样
+  88   2           存储==>要显示的
+  89   2           按照一定时间速率显示
+  90   2      */     
+  91   2      //________存储程序//存满一页
+  92   2            if(d==1000)
+  93   2            {
+  94   3               if(e<130)
+  95   3               {
+  96   4                  ybucketh[e]=a[0];
+  97   4                  ybucketl[e]=b[0];
+  98   4      //            xbucket[e]=e;
+  99   4                  e++;
+ 100   4               }
+ 101   3               else
+ 102   3               {
+ 103   4                 e=0;
+ 104   4                 ybucketh[e]=a[0];
+ 105   4                 ybucketl[e]=b[0];
+ 106   4      //           xbucket[e]=e;
+ 107   4                 e++;
+ 108   4               }
+ 109   3            }
+ 110   2      //      OLED_Clear(1);  
+ 111   2      //________显示程序///E控制时钟，y分7页,先取出e对应y量
+ 112   2            /*
+ 113   2           for(xpoint=0;xpoint<128;xpoint++) //选择bucket横坐标（提取存储的数据）
+ 114   2          {
+ 115   2             
+ 116   2             ydec[xpoint]=(ybucketh[xpoint]*16+ybucketl[xpoint]) //12位二进制位转换
+C51 COMPILER V9.00   8A8KADCTEST                                                           12/07/2021 15:25:04 PAGE 3   
+
+ 117   2             for(page=1;page<6;page++) //先选择页，从1~5
+ 118   2            {
+ 119   2              if ( ydec[xpoint]>=(819.2*(5-page)) && ydec[xpoint]<(819.2*(6-page)) ) //判断是否在本页有值
+ 120   2              {
+ 121   2                  ydeviation[xpoint] = ydec[xpoint]-(819.2*(5-page)); //取出与本页底值的差值
+ 122   2                  for(ypoint=0;ypoint<8;ypoint++)      //判断是本页（本字节）第几位有值 ！上l下m  /
+             -/求出在本页的位置，即传输的数据
+ 123   2                  {
+ 124   2                      tage=0x01;
+ 125   2                      color=0x00;
+ 126   2                      if ( ylevel[xpoint]>=(102.4*(7-ypoint)) && ylevel[xpoint]<(102.4*(8-ypoint)) )  //判断是否在�
+             -��字节有值 //ypoint控制循环左移？
+ 127   2                      {
+ 128   2                          color=tage;
+ 129   2                      }
+ 130   2                      tage<<=1; 
+ 131   2                  }
+ 132   2                  OLED_WR_Byte(color,OLED_DATA); 
+ 133   2              }
+ 134   2              else  //若不在本页有值
+ 135   2              {
+ 136   2                  color=0x00;
+ 137   2                  for(n=0;n<WIDTH;n++)   //填充行
+ 138   2                  {
+ 139   2                    OLED_WR_Byte(color,OLED_DATA); 
+ 140   2                  }         
+ 141   2              }
+ 142   2      //        OLED_WR_Byte(color,OLED_DATA); 
+ 143   2           }  
+ 144   2           */
+ 145   2      /////////////////////////////////////////////////////////////////       
+ 146   2              x=e;
+ 147   2              y=;
+*** ERROR C141 IN LINE 147 OF 8A8KADCTEST.C: syntax error near ';'
+ 148   2              if(e==129)
+ 149   2              {
+ 150   3                  
+ 151   3              }
+ 152   2              else
+ 153   2              {
+ 154   3                  OLED_Set_Pos(x,y);
+ 155   3              }
+ 156   2          
+ 157   2          }
+ 158   1         }  
+ 159          }
+ 160              } 
+ 161          }  
+ 162           
+ 163          
+ 164          /*
+ 165           查询法
+ 166           tips:
+ 167           1、while(0)表示不执行语句 
+ 168           2、&：实现逐个位的检测
+ 169          */
+ 170          /*
+ 171          void main() 
+ 172          { 
+ 173             P1M0 = 0x00; //设置 P1.0 为 ADC 口
+ 174             P1M1 = 0x01;  //高阻输入
+ 175             ADCCFG = 0x00; //设置 ADC 时钟为系统时钟/2/16/16 SYSclk/2/16/SPEED  46875HZ 被采最高频率2
+C51 COMPILER V9.00   8A8KADCTEST                                                           12/07/2021 15:25:04 PAGE 4   
+
+             -3437.5
+ 176             ADC_CONTR = 0x80; //使能 ADC 模块
+ 177             while (1) 
+ 178             { 
+ 179             ADC_CONTR |= 0x40; //启动 AD 转换
+ 180               _nop_(); 
+ 181               _nop_();  //跑一个机器周期，相当于0.5us延时
+ 182               while (!(ADC_CONTR & 0x20));    
+ 183                 查询 ADC 完成标志：ADC_FLAG=1,&结果为1，!1=0, 
+ 184                 while(0)表示不执行语句 直接跳过    while(1)循环等待转换完成
+ 185                 &：实现逐个位的检测  
+ 186               ADC_CONTR &= ~0x20; //清完成标志
+ 187               a = ADC_RES; //读取 ADC 结果
+ 188               b = ADC_RESL;
+ 189               P2=a[0];
+ 190               Delay3000ms();
+ 191               P2=b[0]; 
+ 192          } 
+ 193          */
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  1 ERROR(S)
