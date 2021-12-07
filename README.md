@@ -1,1 +1,1 @@
-# STC8A8K_oscilloscope-
+# STC8A8K_oscilloscope
